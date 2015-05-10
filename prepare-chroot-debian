@@ -23,6 +23,7 @@ fi
 # Build packages to be installed to allow building of Qubes modules
 # ------------------------------------------------------------------------------
 BUILDPACKAGES="reprepro build-essential devscripts git git-buildpackage pbuilder debhelper quilt libxen-dev python libpulse-dev libtool automake xorg-dev xutils-dev libxdamage-dev libxcomposite-dev libxt-dev libx11-dev"
+APT_GET_OPTIONS="-o Dpkg::Options::=--force-unsafe-io"
 
 if ! [ -d $DIR/home/user ]; then
     # --------------------------------------------------------------------------
@@ -76,7 +77,7 @@ else
 
     # update chroot
     chroot $DIR apt-get update
-    chroot $DIR apt-get -y upgrade
+    chroot $DIR apt-get $APT_GET_OPTIONS -y upgrade
 fi
 
 # ------------------------------------------------------------------------------
@@ -89,7 +90,7 @@ fi
 # ------------------------------------------------------------------------------
 # Install all build packages specified
 # ------------------------------------------------------------------------------
-chroot $DIR apt-get -y install $BUILDPACKAGES
+chroot $DIR apt-get $APT_GET_OPTIONS -y install $BUILDPACKAGES
 
 if [ "$DIST" == "wheezy" ]; then
     # Looks like a SID only package is being used to build packages
@@ -100,7 +101,7 @@ if [ "$DIST" == "wheezy" ]; then
         echo "$source" >> "${DIR}/etc/apt/sources.list"
     fi
     chroot $DIR apt-get update
-    chroot $DIR apt-get -t wheezy-backports install -y dh-systemd config-package-dev
+    chroot $DIR apt-get $APT_GET_OPTIONS -t wheezy-backports install -y dh-systemd config-package-dev
 fi
 
 # ------------------------------------------------------------------------------
