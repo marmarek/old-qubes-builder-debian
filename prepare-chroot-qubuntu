@@ -19,6 +19,7 @@ fi
 # ------------------------------------------------------------------------------
 BUILDPACKAGES="reprepro build-essential devscripts git git-buildpackage pbuilder debhelper quilt libxen-dev python libpulse-dev libtool automake xorg-dev xutils-dev libxdamage-dev libxcomposite-dev libxt-dev libx11-dev"
 APT_GET_OPTIONS="-o Dpkg::Options::=--force-unsafe-io"
+APT_GET_OPTIONS+=" -o Acquire::Retries=3"
 
 INITIAL=
 
