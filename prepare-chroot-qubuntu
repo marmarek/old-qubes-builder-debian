@@ -18,6 +18,7 @@ fi
 # Build packages to be installed to allow building of Qubes modules
 # ------------------------------------------------------------------------------
 BUILDPACKAGES="reprepro build-essential devscripts git git-buildpackage pbuilder debhelper quilt libxen-dev python libpulse-dev libtool automake xorg-dev xutils-dev libxdamage-dev libxcomposite-dev libxt-dev libx11-dev"
+APT_GET_OPTIONS="-o Dpkg::Options::=--force-unsafe-io"
 
 INITIAL=
 
@@ -74,7 +75,7 @@ else
 
     # update chroot
     chroot $DIR apt-get update
-    chroot $DIR eatmydata apt-get -y upgrade
+    chroot $DIR eatmydata apt-get $APT_GET_OPTIONS -y upgrade
 fi
 
 # ------------------------------------------------------------------------------
@@ -93,13 +94,13 @@ chroot $DIR apt-get update
 # ------------------------------------------------------------------------------
 # Install all build packages specified
 # ------------------------------------------------------------------------------
-chroot $DIR eatmydata apt-get -y install $BUILDPACKAGES
+chroot $DIR eatmydata apt-get $APT_GET_OPTIONS -y install $BUILDPACKAGES
 
 # Install pulseaudio5
-chroot $DIR apt-get install -y software-properties-common
+chroot $DIR apt-get $APT_GET_OPTIONS install -y software-properties-common
 chroot $DIR add-apt-repository -y ppa:ubuntu-audio-dev/pulse-testing
 chroot $DIR apt-get update
-chroot $DIR apt-get install -y libpulse-dev
+chroot $DIR apt-get $APT_GET_OPTIONS install -y libpulse-dev
 
 # ------------------------------------------------------------------------------
 # Install keyring
