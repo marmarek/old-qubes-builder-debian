@@ -3,4 +3,3 @@
 #
 sysfs                   /sys                    sysfs   defaults        0 0
 proc                    /proc                   proc    defaults        0 0
-xen                     /proc/xen               xenfs   defaults        0 0
