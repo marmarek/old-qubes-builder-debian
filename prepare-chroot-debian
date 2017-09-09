@@ -154,6 +154,16 @@ if [ -n "$USE_QUBES_REPO_VERSION" ]; then
     chroot $DIR apt-key add - < ${DEBIAN_PLUGIN_DIR}keys/qubes-debian-r${USE_QUBES_REPO_VERSION}.asc
 fi
 
+if [ -n "$WHONIX_REPO_DEBUG" ]; then
+    source="deb http://deb.whonix.org jessie-proposed-updates main"
+    if ! fgrep -r -q "$source" "${DIR}/etc/apt/sources.list"*; then
+        touch "${DIR}/etc/apt/sources.list"
+        echo "$source" >> "${DIR}/etc/apt/sources.list"
+    fi
+    chroot $DIR apt-key adv --keyserver pgp.mit.edu --recv-key "916B8D99C38EAF5E8ADC7A2A8D66066A2EEACCDA"
+fi
+
+
 # ------------------------------------------------------------------------------
 # Refresh package list (but not qubes repo since it does not yet exist)
 # ------------------------------------------------------------------------------
