@@ -49,8 +49,6 @@
 PACKAGE_LIST = $(DEBIAN_BUILD_DIRS)
 DIST_BUILD_DIR = /home/user
 
-GIT_TARBALL_NAME ?= ../$(shell $(DEBIAN_PARSER) changelog --package-release-name $(ORIG_SRC)/$(firstword $(DEBIAN_BUILD_DIRS))/changelog 2>/dev/null).orig.tar.gz
-
 ### Variables determined by package's Makefile.builder
 DIST_SRC_DEBIAN_DIR = $(DIST_SRC)/$(DEBIAN_BUILD_DIRS)
 
@@ -138,67 +136,36 @@ ifdef DEBUG
   $(info ╚═══════════════════════════════════════════════════════════════════════════════)
 endif
 
-dist-prepare-chroot: $(CHROOT_DIR)/home/user/.prepared_base
-	@if [ $(VERBOSE) -gt 0 ]; then \
-		echo "-> dist-prepare-chroot for $(DIST)"; \
-		echo "-> sudo mount --bind $(BUILDER_REPO_DIR) $(CHROOT_DIR)/tmp/qubes-deb;"; \
-	fi
-	@if [ ! -r $(CHROOT_DIR)/proc/cpuinfo ]; then\
-		sudo mount -t proc proc $(CHROOT_DIR)/proc;\
-	fi
-	@if ! [ -d $(CHROOT_DIR)/tmp/qubes-deb/deb ]; then\
-		mkdir -p $(CHROOT_DIR)/tmp/qubes-deb;\
-		sudo mount --bind $(BUILDER_REPO_DIR) $(CHROOT_DIR)/tmp/qubes-deb;\
-	fi
+dist-prepare-chroot: $(CHROOT_DIR)/.prepared_pbuilder
+	@true
 
-$(CHROOT_DIR)/home/user/.prepared_base: $(DEBIAN_PLUGIN_DIR)/prepare-chroot-$(DISTRIBUTION)
-	# Make sure repo directory exists
-	@if ! [ -d "$(BUILDER_REPO_DIR)/dists" ]; then\
-	    mkdir -p "$(BUILDER_REPO_DIR)/dists";\
-	fi
+
+$(CHROOT_DIR)/.prepared_pbuilder: $(DEBIAN_PLUGIN_DIR)/pbuilderrc
+	@mkdir -p $(CHROOT_DIR)
 	@echo "-> Preparing $(DIST) build environment"
-	@sudo -E $(DEBIAN_PLUGIN_DIR)/prepare-chroot-$(DISTRIBUTION) $(CHROOT_DIR) $(DIST)
-	@touch $(CHROOT_DIR)/home/user/.prepared_base
+	$(DEBIAN_PLUGIN_DIR)/update-local-repo.sh $(DIST)
+	if [ -n "$(USE_QUBES_REPO_VERSION)" ]; then \
+		gpg --dearmor < $(DEBIAN_PLUGIN_DIR)keys/qubes-debian-r$(USE_QUBES_REPO_VERSION).asc > $(CHROOT_DIR)/qubes-keyring.gpg; \
+	fi
+	if [ -r "$(CHROOT_DIR)/base.tgz" ]; then \
+		action=update; \
+	else \
+		action=create; \
+	fi; \
+	sudo -E pbuilder $$action --basetgz $(CHROOT_DIR)/base.tgz \
+		--distribution $(DIST) \
+		--configfile $(DEBIAN_PLUGIN_DIR)/pbuilderrc \
+		--othermirror "deb [trusted=yes] file:/tmp/qubes-deb $(DIST) main"
+	@touch $(CHROOT_DIR)/.prepared_pbuilder
 
 dist-prep: release_name = $(shell $(DEBIAN_PARSER) changelog --package-release-name $(ORIG_SRC)/$(DEBIAN_BUILD_DIRS)/changelog)
 dist-prep:
-	@rm -f "$(CHROOT_DIR)/$(DIST_SRC)/../$(release_name)"*
 
-dist-build-dep: 
-	@if ! [ -d "$(BUILDER_REPO_DIR)/dists" ]; then\
-	    mkdir -p "$(BUILDER_REPO_DIR)/dists";\
-	fi
-	$(DEBIAN_PLUGIN_DIR)/update-local-repo.sh $(DIST)
-	sudo chroot $(CHROOT_DIR) apt-get ${APT_GET_OPTIONS} update
+dist-build-dep:
+	@true
 
-	# check for CVE-2016-1252 - directly after debootstrap, still vulnerable
-	# apt is installed
-	wc -L "$(CHROOT_DIR)/var/lib/apt/lists/"*InRelease | awk '$$1 > 1024 {print; exit 1}'
-
-	# update the base system inside
-	sudo chroot $(CHROOT_DIR) apt-get $(APT_GET_OPTIONS) dist-upgrade -y
-
-	# Parse debian/control for Build-Depends and install
-	$(DEBIAN_PARSER) control --build-depends $(CHROOT_DEBIAN_DIR)/control |\
-		xargs sudo chroot $(CHROOT_DIR) apt-get $(APT_GET_OPTIONS) install -y
-
-	# Parse debian/control for custom X-Qubes-Build-Depends-[debian] depends and install
-	$(DEBIAN_PARSER) control --qubes-build-depends $(DISTRIBUTION) $(CHROOT_DEBIAN_DIR)/control |\
-		xargs sudo chroot $(CHROOT_DIR) apt-get $(APT_GET_OPTIONS) install -y
-
-	# Parse debian/control for custom X-Qubes-Build-Depends-[wheezy/jessie] depends and install
-	$(DEBIAN_PARSER) control --qubes-build-depends $(DIST) $(CHROOT_DEBIAN_DIR)/control |\
-		xargs sudo chroot $(CHROOT_DIR) apt-get $(APT_GET_OPTIONS) install -y
-
-ifneq (,$(DEBIAN_BUILD_DIRS))
-dist-package:  release_name = $(shell $(DEBIAN_PARSER) changelog --package-release-name $(ORIG_SRC)/$(DEBIAN_BUILD_DIRS)/changelog)
-endif
-dist-package:
-ifndef PACKAGE
-	$(error "PACKAGE need to be set!")
-endif
-	# Cleanup; delete any old builds, except leave the orig that may have
-	# been created on copy-in build stage
+.PHONY: build-source-package
+build-source-package:
 	cd $(CHROOT_DIR)/$(DIST_SRC)/..; GLOBIGNORE=$(release_name)*orig*; rm -f $(release_name)*; GLOBIGNORE=
 	rm -rf $(CHROOT_DIR)/$(DIST_SRC)/deb/*
 	rm -rf $(CHROOT_DIR)/$(DIST_SRC)/rpm/*
@@ -214,18 +181,17 @@ endif
 				grep -zv '^\./\.git\|~$$' |\
 				LC_ALL=C sort -z |\
 				tar --no-recursion --null -T - \
-				--owner=0 --group=0 --numeric-owner \
-			    --mtime="@$${SOURCE_DATE_EPOCH}" -cJf ../$(release_name).orig.tar.xz; \
+					--owner=0 --group=0 --numeric-owner \
+					--mtime="@$${SOURCE_DATE_EPOCH}" -cJf ../$(release_name).orig.tar.xz; \
 		fi; \
 	fi
 
-
 ifneq (,$(INCREMENT_DEVEL_VERSIONS))
-	# Break the hardlink - keep modified debian/changelog only inside of chroot
+	# Break the hardlink - keep modified debian/changelog only in build copy
 	cp $(CHROOT_DEBIAN_DIR)/changelog $(CHROOT_DEBIAN_DIR)/changelog.copy
 	mv $(CHROOT_DEBIAN_DIR)/changelog.copy $(CHROOT_DEBIAN_DIR)/changelog
 	# Update changelog with -develXX appended to version
-	# Note: INCREMENT_DEVEL_VERSIONS needs to be set to any value in 
+	# Note: INCREMENT_DEVEL_VERSIONS needs to be set to any value in
 	#       builder configuration to use this feature
 	cd $(CHROOT_DEBIAN_DIR)/..; $(DEBIAN_PLUGIN_DIR)/scripts/debian-changelog.sh
 
@@ -234,9 +200,8 @@ ifneq (,$(INCREMENT_DEVEL_VERSIONS))
 	cp -np $(CHROOT_DEBIAN_DIR)/changelog.dist $(ORIG_SRC)/$(DEBIAN_BUILD_DIRS)/ 2>/dev/null || true
 	cp -np $(CHROOT_DEBIAN_DIR)/changelog.$(DIST) $(ORIG_SRC)/$(DEBIAN_BUILD_DIRS)/ 2>/dev/null || true
 
-	sudo $(CHROOT_ENV) chroot $(CHROOT_DIR) su $(RUN_AS_USER) -c 'cd $(DIST_SRC_DEBIAN_DIR)/..; export LC_ALL=C; dpkg-buildpackage -sa -uc -us'
 else
-	# Only used to update changelog to new version since changelog is 
+	# Only used to update changelog to new version since changelog is
 	# also called below
 	cd $(CHROOT_DEBIAN_DIR)/..; $(DEBIAN_PLUGIN_DIR)/scripts/debian-changelog.sh
 
@@ -245,8 +210,52 @@ else
 	mv $(CHROOT_DEBIAN_DIR)/changelog.copy $(CHROOT_DEBIAN_DIR)/changelog
 
 	echo "Building package in $(DIST_SRC)"
-	sudo $(CHROOT_ENV) chroot $(CHROOT_DIR) su $(RUN_AS_USER) -c 'cd $(DIST_SRC_DEBIAN_DIR)/..; export LC_ALL=C; debchange -t -l+$(DIST_TAG)u "Build for $(DIST)"; debchange -t --force-distribution -r -D $(DIST) $(DIST); dpkg-buildpackage -sa -uc -us'
+	cd $(CHROOT_DIR)/$(DIST_SRC); export LC_ALL=C; debchange -t -l+$(DIST_TAG)u "Build for $(DIST)"; debchange -t --force-distribution -r -D $(DIST) $(DIST)
 endif
+
+	$(DEBIAN_PLUGIN_DIR)/scripts/clamp-changelog-entry-date $(CHROOT_DEBIAN_DIR)/changelog
+
+	# Break the hardlink - keep modified debian/changelog only inside of chroot
+	mv $(CHROOT_DEBIAN_DIR)/control $(CHROOT_DEBIAN_DIR)/control.copy
+	build_deps=$$(grep '^X-Qubes-Build-Depends-\($(DIST)\|$(DISTRIBUTION)\):' \
+		$(CHROOT_DEBIAN_DIR)/control.copy |\
+		cut -d : -f 2); \
+	sed -e "s/^Build-Depends:/\0 $$build_deps, /" \
+		< $(CHROOT_DEBIAN_DIR)/control.copy \
+		> $(CHROOT_DEBIAN_DIR)/control
+	rm -f $(CHROOT_DEBIAN_DIR)/control.copy
+
+	cd $(CHROOT_DIR)/$(DIST_SRC) && \
+	dpkg-source -b .
+
+
+ifneq (,$(DEBIAN_BUILD_DIRS))
+dist-package:  release_name = $(shell $(DEBIAN_PARSER) changelog --package-release-name $(ORIG_SRC)/$(DEBIAN_BUILD_DIRS)/changelog)
+dist-package: build-source-package
+endif
+dist-package:
+ifndef PACKAGE
+	$(error "PACKAGE need to be set!")
+endif
+	$(DEBIAN_PLUGIN_DIR)/update-local-repo.sh $(DIST)
+
+	mkdir -p "$(CHROOT_DIR)/results"
+
+	extra_sources="deb [trusted=yes] file:/tmp/qubes-deb $(DIST) main"; \
+	if [ -n "$(USE_QUBES_REPO_VERSION)" ]; then \
+		extra_sources="$$extra_sources|deb [arch=amd64] http://deb.qubes-os.org/r$(USE_QUBES_REPO_VERSION)/vm $(DIST) main"; \
+		if [ "0$(USE_QUBES_REPO_TESTING)" -gt 0 ]; then \
+			extra_sources="$$extra_sources|deb [arch=amd64] http://deb.qubes-os.org/r$(USE_QUBES_REPO_VERSION)/vm $(DIST)-testing main"; \
+		fi; \
+		gpg --dearmor < $(DEBIAN_PLUGIN_DIR)keys/qubes-debian-r$(USE_QUBES_REPO_VERSION).asc > $(CHROOT_DIR)/qubes-keyring.gpg; \
+	fi; \
+	cd $(CHROOT_DIR)/$(DIST_SRC)/.. && \
+	sudo -E pbuilder build --basetgz $(CHROOT_DIR)/base.tgz \
+		--override-config \
+		--distribution $(DIST) \
+		--configfile $(DEBIAN_PLUGIN_DIR)/pbuilderrc \
+		--othermirror "$$extra_sources" \
+		$(CHROOT_DIR)/$(DIST_SRC)/../$(release_name)*+$(DIST_TAG)u1.dsc
 
 ifneq (,$(DEBIAN_BUILD_DIRS))
 dist-copy-out:  release_name = $(shell $(DEBIAN_PARSER) changelog --package-release-name $(CHROOT_DEBIAN_DIR)/changelog)
@@ -254,12 +263,8 @@ endif
 dist-copy-out:
 	mkdir -p $(BUILDER_REPO_DIR)/deb
 	mkdir -p $(ORIG_SRC)/$(OUTPUT_DIR)
-	cd $(CHROOT_DEBIAN_DIR)/../..; \
-		cp -t $(BUILDER_REPO_DIR)/deb `$(listfiles) $(release_name)*.changes`
-	cp -t $(BUILDER_REPO_DIR)/deb/ $(CHROOT_DEBIAN_DIR)/../../$(release_name)*.changes
-	cd $(CHROOT_DEBIAN_DIR)/../..; \
-		mv -t $(PWD)/$(ORIG_SRC)/$(OUTPUT_DIR)  `$(listfiles) $(release_name)*.changes`
-	mv -t $(PWD)/$(ORIG_SRC)/$(OUTPUT_DIR) $(CHROOT_DEBIAN_DIR)/../../$(release_name)*.changes
+	dcmd cp -t $(BUILDER_REPO_DIR)/deb $(CHROOT_DIR)/results/$(release_name)*.changes
+	dcmd mv -t $(PWD)/$(ORIG_SRC)/$(OUTPUT_DIR) $(CHROOT_DIR)/results/$(release_name)*.changes
 
 ifeq (,$(DEBIAN_BUILD_DIRS))
 update-repo:
